@@ -1,0 +1,19 @@
+[package]
+name = "bip-api"
+version = "0.1.0"
+authors = ["cbourjau <cbourjau@posteo.de>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+reqwest = {"version"="0.10.1", "features"=["cookies"] }
+futures = "0.3.4"
+tokio = { version = "0.2", features = ["macros"] }
+thiserror = "1.0.11"
+scraper = "0.11.0"
+unhtml_derive = "0.7.5"
+unhtml = "0.7.5"
+libxml = "0.2.13"
+regex = "1.3.4"
+url = "2.1.1"
