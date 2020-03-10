@@ -9,7 +9,7 @@ use thiserror::Error;
 use url::Url;
 
 pub mod parsing;
-// mod engine;
+pub mod engine;
 
 #[derive(Debug, PartialEq)]
 pub enum Citation {
