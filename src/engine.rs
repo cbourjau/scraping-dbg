@@ -1,4 +1,5 @@
 use std::time::Duration;
+use std::sync::{Arc, Mutex};
 use serde::Serialize;
 
 use libxml::parser::Parser;
@@ -9,10 +10,14 @@ use futures::channel::{mpsc, mpsc::UnboundedSender, oneshot};
 use futures::stream::{self, StreamExt};
 use futures::sink::SinkExt;
 
+
+
+type RequestChannel = Arc<Mutex<UnboundedSender<(Request, oneshot::Sender<Result<String, EngineError>>)>>>;
+
 #[derive(Clone)]
 pub struct Engine {
     client: Client,
-    request_channel: UnboundedSender<(Request, oneshot::Sender<Result<String, EngineError>>)>,
+    request_channel: RequestChannel
 }
 
 #[derive(Debug, Error)]
@@ -53,7 +58,7 @@ impl Response {
     }
 }
 
-async fn request2body(req: reqwest::Request, client: &Client) -> Result<String, EngineError> {
+async fn request2body(req: reqwest::Request, client: Arc<Client>) -> Result<String, EngineError> {
     let resp = client.execute(req).await?;
     let resp = resp.error_for_status()?;
     let body = resp.text().await?;
@@ -72,22 +77,25 @@ impl Engine {
             .cookie_store(true)
             .timeout(Duration::from_secs(10))
             .build()?;
-	let (tx, mut rv) = mpsc::unbounded::<(Request, oneshot::Sender<_>)>();
+	let (tx, rv) = mpsc::unbounded::<(Request, oneshot::Sender<_>)>();
 
-	let client_rt = client.clone();
+	let client_rt = Arc::new(client.clone());
 	tokio::spawn(async move {
-	    while let Some((req, back_tx)) = rv.next().await {
-		let body = request2body(req, &client_rt).await;
-		back_tx.send(body).expect("Failed sending to one-shot channel.");
-	    }
+	    rv.for_each_concurrent(10, move |(req, back_tx)| {
+		let client = client_rt.clone();
+		async move {
+		    let body = request2body(req, client).await;
+		    back_tx.send(body).expect("Failed sending to one-shot channel.");
+		}
+	    }).await;
 	});
 
 	Ok(Self {
-	    client, request_channel: tx
+	    client: client, request_channel: Arc::new(Mutex::new(tx))
 	})
     }
 
-    pub async fn get<T>(&mut self, url: T) -> Result<Response, EngineError>
+    pub async fn get<T>(&self, url: T) -> Result<Response, EngineError>
 	where T: IntoUrl + Clone + std::fmt::Display
     {
 	let url = url.into_url()?;
@@ -95,8 +103,11 @@ impl Engine {
 	for _ in 0..retries {
 	    let req = self.client.get(url.clone()).build()?;
 	    let (tx, rx) = oneshot::channel();
-	    self.request_channel.send((req, tx)).await.expect("Channel communication failed");
-
+	    // self.request_channel.send((req, tx)).await.expect("Channel communication failed");
+	    
+	    {
+		self.request_channel.lock().unwrap().send((req, tx))
+	    }.await.expect("Channel communication failed");
 	    let body_res = rx.await.expect("Channel communication failed");
 	    if let Err(e) = body_res {
 		eprintln!("Error: {}; Retrying: {:}", e,  url);
@@ -110,7 +121,7 @@ impl Engine {
 	unimplemented!();
     }
     
-    pub async fn post<U, D>(&mut self, url: U, data: &D) -> Result<Response, EngineError>
+    pub async fn post<U, D>(&self, url: U, data: &D) -> Result<Response, EngineError>
     where D: Serialize,
 	  U: IntoUrl + Clone + std::fmt::Display
     {
@@ -119,15 +130,16 @@ impl Engine {
 	for _ in 0..retries {
 	    let req = self.client.post(url.clone()).form(data).build()?;
 
-	    dbg!(std::str::from_utf8(req.body().unwrap().as_bytes().unwrap()));
 	    let (tx, rx) = oneshot::channel();
-	    self.request_channel.send((req, tx)).await.expect("Channel communication failed");
-
+	    // self.request_channel.send((req, tx)).await.expect("Channel communication failed");
+	    {
+		self.request_channel.lock().unwrap().send((req, tx))
+	    }.await.expect("Channel communication failed");
 	    let body_res = rx.await.expect("Channel communication failed");
-	    // if let Err(e) = body_res {
-	    // 	eprintln!("Error: {:}; Retrying: {:}", e,  url);
-	    // 	continue;
-	    // }
+	    if let Err(e) = body_res {
+	    	eprintln!("Error: {:}; Retrying: {:}", e,  url);
+	    	continue;
+	    }
 	    return Ok(body_res.map(|body| Response {
 		url, body,
 	    })?);
@@ -135,15 +147,6 @@ impl Engine {
 	unimplemented!();
     }
 }
-
-// fn run_thing() {
-//     let engine = Engine.default();
-//     let search_request = {
-// 	// Search params and stuff
-// 	unimplemented!()
-//     }
-//     let item = engine.request(request);
-// }
 
 /// Extract pre-populated form data on a best-effort basis.
 fn form_values(body: &str, form_xpath: &str) -> Result<Vec<(String, String)>, EngineError> {
@@ -171,6 +174,9 @@ fn form_values(body: &str, form_xpath: &str) -> Result<Vec<(String, String)>, En
                 }
             }
         }
+	if node.get_attribute("disabled") == Some("disabled".to_string()) {
+	    continue;
+	}
         if let (Some(name), Some(value)) = (node.get_attribute("name"), node.get_attribute("value"))
         {
             out.push((name, value));
@@ -215,29 +221,44 @@ mod tests {
         let values = dbg!(form_values(&body, "//form").unwrap());
         assert_eq!(values.len(), 99);
     }
+    #[tokio::test]
+    async fn parse_form_page2() {
+        let body = read_to_string("./src/test_data/DIP21.html").unwrap();
+        let values = dbg!(form_values(&body, "//form").unwrap());
+        assert_eq!(values.len(), 99);
+    }    
 
     #[tokio::test]
     async fn do_post() {
 	/// The Url which has to be hit to set the cookies for subsequent search queries
 	const COOKIE_LANDING: &str = "http://dipbt.bundestag.de/dip21.web/bt";
 
-	let SEARCH_URL =
+	let search_url =
 	    "http://dipbt.bundestag.de/dip21.web/searchProcedures/advanced_search_list.do";
 
 	// Start up the engine
-	let mut engine = Engine::new().unwrap();
+	let engine = Engine::new().unwrap();
 	// Get cookies
 	engine.get(COOKIE_LANDING).await.unwrap();
-	let resp = engine.get(SEARCH_URL).await.unwrap();
+	let resp = engine.get(search_url).await.unwrap();
 
 	let mut form = form_values(&resp.body, "//form").unwrap();
-
 	// Add the parameters needed to kick of the search
 	form.push(("method".to_string(), "Suchen".to_string()));
-
-	let resp = engine.post(SEARCH_URL, &form).await.unwrap();
-	for link in resp.select_links("//div[@class='tabelleGross']//a[@class='linkIntern']/@href").unwrap().into_iter() {
-	    engine.get(link).await;
+	loop {
+	    let resp = engine.post(search_url, &form).await.unwrap();
+	    let links = resp.select_links("//div[@class='tabelleGross']//a[@class='linkIntern']/@href").unwrap();
+	    dbg!(links.len());
+	    stream::iter(links.into_iter())
+	    	.for_each_concurrent(None, |link| async {
+		    let resp = engine.get(link).await;
+		    dbg!(resp.unwrap().body.len());
+		})
+	    	.await;
+	    // Prepare the form for the next iteration
+	    form = form_values(&resp.body, "//form").unwrap();
+	    // Add the parameters needed to kick of the search
+	    form.push(("method".to_string(), ">".to_string()));
 	}
-    }    
+    }
 }
