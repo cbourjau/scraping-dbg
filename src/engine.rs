@@ -7,7 +7,7 @@ use reqwest::{self, header, Client, ClientBuilder, Request, IntoUrl};
 use thiserror::Error;
 use url::Url;
 use futures::channel::{mpsc, mpsc::UnboundedSender, oneshot};
-use futures::stream::{self, StreamExt};
+use futures::stream::{self, Stream, StreamExt};
 use futures::sink::SinkExt;
 
 
@@ -209,6 +209,16 @@ fn form_values(body: &str, form_xpath: &str) -> Result<Vec<(String, String)>, En
     Ok(out)
 }
 
+async fn handle_item(thing: Result<Response, EngineError>) {
+    dbg!(thing.unwrap().body.len());
+}
+
+async fn pipe_out(things: impl Stream<Item=Result<Response, EngineError>>) {
+    things.for_each(|resp| async move {
+	handle_item(resp).await;
+    }).await;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,12 +259,8 @@ mod tests {
 	    let resp = engine.post(search_url, &form).await.unwrap();
 	    let links = resp.select_links("//div[@class='tabelleGross']//a[@class='linkIntern']/@href").unwrap();
 	    dbg!(links.len());
-	    stream::iter(links.into_iter())
-	    	.for_each_concurrent(None, |link| async {
-		    let resp = engine.get(link).await;
-		    dbg!(resp.unwrap().body.len());
-		})
-	    	.await;
+	    let links = stream::iter(links).then(|l| engine.get(l));
+	    pipe_out(links).await;
 	    // Prepare the form for the next iteration
 	    form = form_values(&resp.body, "//form").unwrap();
 	    // Add the parameters needed to kick of the search
