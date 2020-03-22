@@ -1,8 +1,5 @@
 use crate::ApiError;
-use libxml::{
-    parser::Parser,
-    tree::document::Document
-};
+use libxml::{parser::Parser, tree::document::Document};
 use regex::Regex;
 
 #[derive(Debug)]
@@ -18,13 +15,13 @@ impl BipData {
             .parse_string(&html)
             .map_err(|e| ApiError::ParsingError(e.to_string()))?;
         // let result = "Hello World!", "x").to_string();
-        fn extract_and_strip(doc: &Document, xpath: &str) -> Result<String, ApiError>{
+        fn extract_and_strip(doc: &Document, xpath: &str) -> Result<String, ApiError> {
             let re_whitespace = Regex::new(r"[\t\v\f\r ]+").unwrap();
             let re_linebreaks = Regex::new(r"(\n\s*){2,}").unwrap();
             let root = doc
-		.get_root_element()
-		.ok_or_else(|| ApiError::ParsingError("No root Element.".to_string()))?;
-	    
+                .get_root_element()
+                .ok_or_else(|| ApiError::ParsingError("No root Element.".to_string()))?;
+
             let nodes = root
                 .findnodes(xpath)
                 .map_err(|_: ()| ApiError::ParsingError("Failed to apply xpath".to_string()))?;
@@ -35,15 +32,17 @@ impl BipData {
                         "\n\n",
                     )
                     .to_string()),
-                _ => {
-                    Err(ApiError::ParsingError("Unexpected HTML schema".to_string()))
-                }
+                _ => Err(ApiError::ParsingError("Unexpected HTML schema".to_string())),
             }
         };
 
         let content = extract_and_strip(&doc, "//fieldset[h1[contains(text(), 'Inhalt')]]")?;
-        let summary = extract_and_strip(&doc, "//fieldset[h1[contains(text(), 'Basisinformationen')]]")?;
-        let tag_words = extract_and_strip(&doc, "//fieldset[h1[contains(text(), 'Schlagwörter')]]")?;
+        let summary = extract_and_strip(
+            &doc,
+            "//fieldset[h1[contains(text(), 'Basisinformationen')]]",
+        )?;
+        let tag_words =
+            extract_and_strip(&doc, "//fieldset[h1[contains(text(), 'Schlagwörter')]]")?;
         Ok(BipData {
             content,
             summary,

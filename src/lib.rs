@@ -8,8 +8,20 @@ use reqwest::{self, Client, ClientBuilder};
 use thiserror::Error;
 use url::Url;
 
-pub mod parsing;
 pub mod engine;
+pub mod parsing;
+pub mod selector;
+pub mod utils;
+
+#[derive(Debug, Error)]
+pub enum EngineError {
+    #[error("Parsing Error")]
+    ParsingError(String),
+    #[error("Network Error")]
+    IoError(#[from] reqwest::Error),
+    #[error("Requests where the body is a Stream cannot be clones")]
+    RequestCloneError(String),
+}
 
 #[derive(Debug, PartialEq)]
 pub enum Citation {
@@ -88,10 +100,7 @@ impl BipClient {
     /// Create a client which has the necessary cookies set for subsequent queries
     pub async fn new() -> Result<Self, ApiError> {
         let cookied_client = default_client()?;
-        let resp = cookied_client
-            .get(COOKIE_LANDING)
-            .send()
-            .await?;
+        let resp = cookied_client.get(COOKIE_LANDING).send().await?;
 
         // Make sure that we actually got a cookie!
         if resp.cookies().count() == 0 {
@@ -111,7 +120,8 @@ impl BipClient {
         links
             .map(move |l| {
                 async move {
-                    Ok(self.cookied_client
+                    Ok(self
+                        .cookied_client
                         .get(l)
                         .send()
                         .await?
@@ -248,14 +258,15 @@ fn detail_links(body: &str) -> Result<Vec<Url>, ApiError> {
 
     let root = doc.get_root_element().unwrap();
     let mut links = vec![];
-    let nodes = root.findnodes("//div[@class='tabelleGross']//a[@class='linkIntern']/@href") 
+    let nodes = root
+        .findnodes("//div[@class='tabelleGross']//a[@class='linkIntern']/@href")
         .map_err(|()| ApiError::SelectionError("Invalid XPath".to_string()))?;
     for node in nodes {
-	let link = node.get_content();
-	let link = Url::parse(BASE_URL)
-	    .and_then(|base| base.join(&link))
-	    .map_err(|e| ApiError::SelectionError(format!("Invalid Url: {:}", e)))?;
-	links.push(link);
+        let link = node.get_content();
+        let link = Url::parse(BASE_URL)
+            .and_then(|base| base.join(&link))
+            .map_err(|e| ApiError::SelectionError(format!("Invalid Url: {:}", e)))?;
+        links.push(link);
     }
     Ok(links)
 }
