@@ -9,9 +9,11 @@ use thiserror::Error;
 use url::Url;
 
 pub mod engine;
+pub mod item;
 pub mod parsing;
 pub mod selector;
 pub mod utils;
+pub mod retry;
 
 #[derive(Debug, Error)]
 pub enum EngineError {
