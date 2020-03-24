@@ -1,9 +1,21 @@
 use std::time::Duration;
 
-use futures::stream::{Stream, StreamExt};
+use thiserror::Error;
 use reqwest::{self, header, Client, ClientBuilder};
 
-use crate::EngineError;
+pub mod retry;
+pub mod selector;
+pub mod pipelines;
+
+#[derive(Debug, Error)]
+pub enum EngineError {
+    #[error("Parsing Error")]
+    ParsingError(String),
+    #[error("Network Error")]
+    IoError(#[from] reqwest::Error),
+    #[error("Requests where the body is a Stream cannot be clones")]
+    RequestCloneError(String),
+}
 
 pub fn default_client() -> Result<Client, EngineError> {
     let mut headers = header::HeaderMap::new();
@@ -19,27 +31,6 @@ pub fn default_client() -> Result<Client, EngineError> {
     Ok(client)
 }
 
-pub struct StdOutPipeline;
-
-impl StdOutPipeline {
-    pub async fn handle_item<T>(&self, thing: Result<T, EngineError>)
-    where
-        T: std::fmt::Debug,
-    {
-        dbg!(thing.unwrap());
-    }
-
-    pub async fn pipe_out<T>(&self, things: impl Stream<Item = Result<T, EngineError>>)
-    where
-        T: std::fmt::Debug,
-    {
-        things
-            .for_each(|resp| async move {
-                self.handle_item(resp).await;
-            })
-            .await;
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -48,9 +39,12 @@ mod tests {
     use tokio;
     use tower::{self, Service, ServiceBuilder};
 
-    use super::*;
-    use crate::retry::RetryLimit;
-    use crate::selector::Selector;
+    use crate::scrapers::{
+	default_client,
+	retry::RetryLimit,
+	selector::Selector,
+	pipelines::StdOutPipeline,
+    };
 
     #[tokio::test]
     async fn do_post() {

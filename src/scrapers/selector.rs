@@ -2,7 +2,7 @@ use libxml::{parser::Parser, tree::Document};
 use reqwest::Response;
 use url::Url;
 
-use crate::EngineError;
+use crate::scrapers::EngineError;
 
 pub struct Selector {
     base_url: Url,

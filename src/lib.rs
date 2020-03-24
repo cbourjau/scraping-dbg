@@ -8,22 +8,8 @@ use reqwest::{self, Client, ClientBuilder};
 use thiserror::Error;
 use url::Url;
 
-pub mod engine;
-pub mod item;
+pub mod scrapers;
 pub mod parsing;
-pub mod selector;
-pub mod utils;
-pub mod retry;
-
-#[derive(Debug, Error)]
-pub enum EngineError {
-    #[error("Parsing Error")]
-    ParsingError(String),
-    #[error("Network Error")]
-    IoError(#[from] reqwest::Error),
-    #[error("Requests where the body is a Stream cannot be clones")]
-    RequestCloneError(String),
-}
 
 #[derive(Debug, PartialEq)]
 pub enum Citation {
