@@ -1,18 +1,16 @@
 use futures::stream::{Stream, StreamExt};
 
-use crate::scrapers::EngineError;
-
 pub struct StdOutPipeline;
 
 impl StdOutPipeline {
-    pub async fn handle_item<T>(&self, thing: Result<T, EngineError>)
+    pub async fn handle_item<T>(&self, thing: T)
     where
         T: std::fmt::Debug,
     {
-        dbg!(thing.unwrap());
+        dbg!(thing);
     }
 
-    pub async fn pipe_out<T>(&self, things: impl Stream<Item = Result<T, EngineError>>)
+    pub async fn pipe_out<T>(&self, things: impl Stream<Item = T>)
     where
         T: std::fmt::Debug,
     {

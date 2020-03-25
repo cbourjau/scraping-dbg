@@ -26,24 +26,35 @@ impl Selector {
 
     /// Extract links using xpath guaranteeing them to be absolute.
     pub fn select_links(&self, xpath: &str) -> Result<Vec<Url>, EngineError> {
-        let root = self.doc.get_root_element().unwrap();
-        let mut links = vec![];
-        let nodes = root
-            .findnodes(&xpath)
-            .map_err(|()| EngineError::ParsingError("Invalid XPath".to_string()))?;
-        for node in nodes {
-            let link = node.get_content();
+	let mut links = vec![];
+        for text_link in self.select_text(xpath)?.iter() {
             let link = self
                 .base_url
-                .join(&link)
+                .join(&text_link)
                 .map_err(|e| EngineError::ParsingError(format!("Invalid Url: {:}", e)))?;
             links.push(link);
         }
         Ok(links)
     }
 
+    pub fn select_text(&self, xpath: &str) ->  Result<Vec<String>, EngineError> {
+        let root = self.doc.get_root_element().unwrap();
+        let mut output = vec![];
+        let nodes = root
+            .findnodes(&xpath)
+            .map_err(|()| EngineError::ParsingError("Invalid XPath".to_string()))?;
+        for node in nodes {
+            output.push(node.get_content());
+        }
+        Ok(output)
+    }
+
     pub fn form_data(&self, xpath: &str) -> Result<Vec<(String, String)>, EngineError> {
         form_values(&self.doc, xpath)
+    }
+
+    pub fn body(&self) -> String {
+	self.doc.to_string()
     }
 }
 

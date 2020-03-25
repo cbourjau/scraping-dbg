@@ -6,6 +6,7 @@ use reqwest::{self, header, Client, ClientBuilder};
 pub mod retry;
 pub mod selector;
 pub mod pipelines;
+pub mod utils;
 
 #[derive(Debug, Error)]
 pub enum EngineError {
